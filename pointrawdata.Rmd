@@ -1,0 +1,195 @@
+---
+title: "POINT"
+author: "blinded"
+output: html_document
+---
+
+Libraries and set up.
+
+```{r message=FALSE, warning=FALSE, , paged.print=FALSE, include=FALSE}
+library(readxl)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+```
+
+Read in individual data from data/dataindividual
+```{r warning=FALSE, include=FALSE}
+# Set the path
+setwd("~/Documents/GitHub/pointa/data/dataindividual/")
+#Get file names of individual data files
+my_files <- list.files(pattern = "xlsx$")
+# Read each excel file into a list
+listExcel = lapply(my_files, read_excel)
+# Concatenate the data in each file into one combined data frame
+results = do.call(rbind.data.frame, listExcel)
+rm(listExcel)
+```
+
+Recode 9999 to missing data.
+```{r}
+results[results==9999] <- NA
+```
+
+# AOI Hits
+
+Compute AOI hits.
+
+```{r}
+#Define AOIs
+aoileft = c(5,540,810,1075)
+aoiright = c(1110,540,1915,1075)
+```
+
+```{r}
+results <- results %>%
+  mutate(gazex = as.numeric(gazex)) %>%
+  mutate(gazey = as.numeric(gazey))
+```
+
+Compute AOI hits for the object targeted by the action:
+tg (object targeted by the action), dt (distractor object)
+
+```{r}
+#Compute AOI hits
+results <- results %>%
+  mutate(tghit = ifelse((locactiontarget == "left" | locactiontarget == "L"),
+                            (ifelse((gazex >= aoileft[1] & gazex <= aoileft[3] & gazey >= aoileft[2] & gazey <= aoileft[4]),1,0)),
+                            (ifelse((locactiontarget == "right" | locactiontarget == "R"),
+                               ifelse((gazex >= aoiright[1] & gazex <= aoiright[3] & gazey >= aoiright[2] & gazey <= aoiright[4]),1,0),"?")))) %>%
+  mutate(dthit = ifelse((locactiontarget == "right" | locactiontarget == "R"),
+                            (ifelse((gazex >= aoileft[1] & gazex <= aoileft[3] & gazey >= aoileft[2] & gazey <= aoileft[4]),1,0)),
+                            (ifelse((locactiontarget == "left" | locactiontarget == "L"),
+                               ifelse((gazex >= aoiright[1] & gazex <= aoiright[3] & gazey >= aoiright[2] & gazey <= aoiright[4]),1,0),"?")))) %>%
+  mutate(missingdata = ifelse((is.na(gazex) == 1 & is.na(gazey) == 1), 1, 0))
+```
+
+
+```{r}
+results <- results %>%
+  mutate(tghit = as.numeric(tghit)) %>%
+  mutate(dthit = as.numeric(dthit))
+```
+
+Add experiment.
+```{r}
+results <- results %>%
+  mutate(experiment = ifelse((ID<17),1,ifelse((ID<33),2,(ifelse(ID<49,3,4)))))
+```
+
+Compute difference scores.
+```{r}
+binary <- results %>%
+  group_by(experiment,ID,trial,trialtype,timebin) %>%
+  summarise(sumtghits = sum(tghit,na.rm=TRUE), 
+            sumdthits = sum(dthit,na.rm=TRUE), 
+            sumhits = sumtghits+sumdthits,countna = sum(missingdata),
+            .groups = "keep") %>%
+  mutate(df = (sumtghits-sumdthits)/(sumtghits+sumdthits))
+
+# Compute difference scores
+df <- binary %>%
+  select(experiment, ID, trial, trialtype, timebin, df, countna) %>%
+  pivot_wider(names_from = "timebin", 
+                    values_from = c("df","countna"), 
+                    values_fn = unique) %>%
+  mutate(totalna = 
+           countna_bin1 + countna_bin2 + countna_bin3 + countna_bin4 + countna_bin5) %>%
+  mutate(attendancetest = 1-(totalna/300)) 
+```
+
+# Data exclusion
+
+```{r}
+setwd("~/Documents/GitHub/pointa/data/")
+attendancebeforetest <- read_excel("attendancebeforetest.xlsx")
+df <- merge(df,attendancebeforetest, by=c("ID","trial","experiment"))
+binary <- merge(binary,attendancebeforetest, by=c("ID","trial","experiment"))
+```
+
+Exclude trials with <50% screen attendance.
+```{r}
+df <- df %>%
+  mutate(inclusion = ifelse((attendance == 1),1,0))
+```
+
+# Screen attendance
+
+```{r}
+aux <- df %>%
+  filter(inclusion == 1) %>%
+  group_by(experiment,ID,trialtype) %>%
+  get_summary_stats(attendancetest, type = "mean_sd")
+
+aux %>%
+  group_by(experiment,trialtype) %>%
+  summarise(gmean = round(mean(mean), digits = 2),
+            gmedian = round(median(mean), digits = 2),
+            gsd = round(sd(mean), digits = 2),
+            gmin = round(min(mean), digits = 2),
+            gmax = round(max(mean), digits = 2),
+            .groups = "keep")
+```
+
+
+# Trial numbers
+
+Included trials.
+
+```{r}
+df %>%
+  filter(experiment == 4 & trialtype == "Untrained") %>%
+  select(ID, trial, inclusion) %>%
+  #group_by(ID) %>%
+  summarise(sumincl = sum(inclusion))
+```
+
+```{r}
+aux <- df %>%
+  group_by(experiment,ID,trialtype) %>%
+  summarize(trialnumber = sum(inclusion,na.rm=TRUE), groups = "keep")
+
+aux %>%
+  group_by(experiment,trialtype) %>%
+  get_summary_stats(trialnumber, type = "mean_sd")
+```
+
+# Difference scores
+
+Compute average stats for each participant.
+Inlcude only trials with a minimum 50% onscreen data during both pretest and test.
+
+```{r}
+meandf <- df %>%
+  filter(inclusion == 1) %>%
+  group_by(experiment,ID,trialtype) %>%
+  summarize(bin1 = mean(df_bin1,na.rm=TRUE),
+            bin2 = mean(df_bin2,na.rm=TRUE), 
+            bin3 = mean(df_bin3,na.rm=TRUE),
+            bin4 = mean(df_bin4,na.rm=TRUE),
+            bin5 = mean(df_bin5,na.rm=TRUE), .groups = "keep")
+```
+
+```{r}
+colnames(meandf)[1] <- "Experiment"
+colnames(meandf)[2] <- "Subject"
+colnames(meandf)[3] <- "Condition"
+```
+
+```{r}
+meandf %>%
+  group_by(Experiment,Condition) %>%
+  get_summary_stats(bin1, bin2, bin3, bin4, type="mean_sd")
+```
+
+Save the data.
+```{r}
+library(openxlsx)
+
+meandf$Condition <- factor(meandf$Condition, 
+                           levels = c("Trained", "Untrained"),
+                           labels = c("Trained", "Novel"))
+
+write.xlsx(meandf, "data/datadftest.xlsx", sheetName = "data")
+```
+
