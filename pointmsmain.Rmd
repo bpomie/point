@@ -9,18 +9,18 @@ output:
 
 # Data structure
 
-data_differencescores.xlsx contains:
+datadftest.xlsx contains the difference score data analysed in the main analysis:
 
 * $Experiment$       -- Experiment 1, Experiment 2, Experiment 3, Experiment 4 
-* $ID$               -- unique ID identifying each participant
+* $Subject$               -- unique ID identifying each participant
 * $Condition$         -- word heard at test (trained v. novel)
 * $dfbin1$     --  difference scores in time bin 1
 * $dfbin2$     --  difference scores in time bin 2
 * $dfbin3$     --  difference scores in time bin 3
 * $dfbin4$     --  difference scores in time bin 4
-* $dfbin5$     --  difference scores in time bin 4
-* $dftrial$
-* $proptrial$
+* $dfbin5$     --  difference scores in time bin 5
+* $dftrial$       
+* $proptrial$    
 
 # Libraries and set up
 ```{r message=FALSE, warning=FALSE, , paged.print=FALSE}
