@@ -1,0 +1,576 @@
+---
+title: "Complementary analyses | POINT | Nonverbal action interpretation guides novel word disambiguation in 12-month-olds"
+author: /
+output:
+  word_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+
+# Data structure
+
+## Difference scores
+
+data_differencescores.xlsx contains:
+
+* $Experiment$       -- Experiment 1, Experiment 2, Experiment 3, Experiment 4
+
+* $ID$               -- unique ID identifying each participant
+
+* $Condition$        -- word heard at test (trained v. novel)
+
+* $Namingaction_mean$     -- average difference score in the naming phase (Experiment 1, 2, 4) or still action phase (Experiment 4)
+
+* $Pretest_mean$          -- average difference score in the pretest phase
+
+## First looks
+
+data_firstlooks.xlsx contains:
+
+
+# Libraries and set up
+
+```{r message=FALSE, warning=FALSE, , paged.print=FALSE}
+library(tidyverse)
+library(readxl)
+library(rstatix)
+library(ggpubr)
+library(emmeans)
+library(afex)
+library(sjstats)
+library(lsr)
+```
+
+# Naming 
+
+Load the data.
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+d <- read_excel("data/datadfnamingpretest.xlsx",sheet="data")
+```
+
+Prepare the dataset.
+```{r }
+#Convert Condtition as factor, recode the levels as: Trained, Novel
+d$Condition <- factor(d$Condition,
+                                levels = c("Trained","Novel"),
+                                labels = c("Trained","Novel"))
+
+#Convert Id, Experiment as factor
+d$Id <- factor(d$Id)
+d$Experiment <- factor(d$Experiment)
+
+#Check the data structure
+str(d)
+```
+
+```{r}
+select_vars1 <- c("Namingaction_trial1","Namingaction_trial2","Namingaction_trial3","Namingaction_trial4")
+select_vars2 <- c("Pretest_trial1","Pretest_trial2","Pretest_trial3","Pretest_trial4")
+
+d <- d %>%
+  mutate(meannaming = rowMeans(select(., select_vars1),na.rm = TRUE)) %>%
+  mutate(meanpretest= rowMeans(select(., select_vars2),na.rm = TRUE))
+```
+
+## Descriptive statistics
+
+Compute means and standard deviations for each experiment. 
+```{r}
+d %>%
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meannaming), .groups = "keep") %>%
+  group_by(Experiment) %>%
+  get_summary_stats(meanave, type = "mean_sd")
+```
+
+Check whether the data is normally distributed.
+```{r}
+d %>%
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meannaming), .groups = "keep") %>%
+  group_by(Experiment) %>%
+  shapiro_test(meanave)
+```
+
+## ANOVA [Experiments 1, 2, 4]
+
+```{r}
+daov <- d %>% 
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meannaming), .groups = "keep")
+```
+
+ANOVA.
+```{r}
+anaming<-aov_car((meanave ~ Experiment + Error(Id)), 
+                 data = daov %>%filter(Experiment != "Experiment 3"))
+
+summary(anaming)
+eta_sq(anaming, partial = TRUE)
+```
+
+### Comparisons to chance
+
+Experiment 1.
+```{r}
+aux <- daov %>% filter(Experiment == "Experiment 1")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 2.
+```{r}
+aux <- daov %>% filter(Experiment == "Experiment 2")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 3.
+```{r }
+aux <- daov %>% filter(Experiment == "Experiment 3")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 4.
+```{r}
+aux <- daov %>% filter(Experiment == "Experiment 4")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+## Figures
+
+```{r }
+library(ggrepel)
+library(grid)
+grob <- grobTree(textGrob("Object targeted by the action", x=.5,  y=.95, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+grob2 <- grobTree(textGrob("Distractor", x=.8,  y=.1, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+```
+
+```{r}
+namingdata <- d
+ppnaming <- ggplot(data = namingdata, aes(x=Experiment, y=meannaming)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(position = position_dodge(.9), alpha = .05, width =.5) +
+  geom_jitter(aes(color=Condition), position = position_jitter(.15), size = 1.5, alpha = .55) +
+  scale_y_continuous(name="Difference score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("black", "orange")) +
+  scale_color_manual(values = c("black", "orange")) +
+  stat_summary(fun.data = mean_se, fill="red", color = "blue", shape=18, size = 1.5) +
+  ggtitle("Attention during naming") +
+  annotation_custom(grob) +
+  annotation_custom(grob2)
+
+ppnaming
+```
+
+# Pretest
+
+## Descriptive statistics
+
+Compute means and standard deviations for each experiment. 
+```{r}
+d %>%
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meanpretest), .groups = "keep") %>%
+  group_by(Experiment) %>%
+  get_summary_stats(meanave, type = "mean_sd")
+```
+
+Check whether the data is normally distributed.
+```{r}
+d %>%
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meanpretest), .groups = "keep") %>%
+  group_by(Experiment) %>%
+  shapiro_test(meanave)
+```
+
+## ANOVA
+
+```{r}
+daovpretest <- d %>% 
+  group_by(Experiment,Id) %>%
+  summarise(meanave = mean(meanpretest), .groups = "keep")
+```
+
+```{r}
+#Convert Time as factor
+apretest<-aov_car((meanave ~ Experiment + Error(Id)), 
+  data = daovpretest)
+
+summary(apretest)
+eta_sq(apretest, partial = TRUE)
+```
+
+### Follow-ups
+```{r}
+emmeans(apretest, "Experiment", contr = "pairwise", model = "multivariate")
+```
+
+### Comparisons to chance
+```{r}
+preteste1 <- daovpretest %>% filter(Experiment == "Experiment 1")
+preteste2 <- daovpretest %>% filter(Experiment == "Experiment 2")
+preteste3 <- daovpretest %>% filter(Experiment == "Experiment 3")
+preteste4 <- daovpretest %>% filter(Experiment == "Experiment 4")
+```
+
+Experiment 1.
+
+```{r}
+aux <- daovpretest %>% filter(Experiment == "Experiment 1")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 2.
+
+```{r}
+aux <- daovpretest %>% filter(Experiment == "Experiment 2")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 3.
+
+```{r}
+aux <- daovpretest %>% filter(Experiment == "Experiment 3")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+Experiment 4.
+
+```{r}
+aux <- daovpretest %>% filter(Experiment == "Experiment 4")
+t.test(aux$meanave, mu = 0, alternative = "two.sided")
+cohensD(aux$meanave, mu = 0)
+```
+
+## Figures
+
+```{r}
+pretestdata <- d
+ppretest <- ggplot(data = pretestdata, aes(x=Experiment, y=meanpretest)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(position = position_dodge(.9), alpha = .05, width =.5) +
+  geom_jitter(aes(color=Condition), position = position_jitter(.15), alpha = .55) +
+  scale_y_continuous(name="Difference score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("black", "orange")) +
+  scale_color_manual(values = c("black", "orange")) +
+  stat_summary(fun.data = mean_se, fill="blue", color = "blue", shape=18, size = 1.5) +
+  annotation_custom(grob) +
+  annotation_custom(grob2) +
+  ggtitle("Attention during pretest")
+
+ppretest
+```
+
+# First looks
+
+Load the data.
+```{r }
+# Load the data
+dfirstlooks <- read_excel("data/datafirstlooks.xlsx",sheet="data")
+```
+
+Prepare the dataset.
+```{r }
+#Convert Condtition as factor, recode the levels as: Trained, Novel
+dfirstlooks$Condition <- factor(dfirstlooks$Condition,
+                                levels = c("Trained","Novel"),
+                                labels = c("Trained","Novel"))
+
+#Convert Id, Experiment as factor
+dfirstlooks$Id <- factor(dfirstlooks$Id)
+dfirstlooks$Experiment <- factor(dfirstlooks$Experiment)
+
+#Check the data structure
+str(dfirstlooks)
+```
+
+### Summary statistics
+
+```{r echo=FALSE}
+dfirstlooks %>%
+  group_by(Experiment, Condition) %>%
+  get_summary_stats(Proportion,type = "mean_sd")
+```
+
+```{r echo=FALSE}
+dfirstlooks %>%
+  group_by(Experiment,Condition) %>%
+  shapiro_test(Proportion)
+```
+
+```{r echo=FALSE}
+dfirstlooks %>%
+  group_by(experiment,trialtype) %>%
+  get_summary_stats(ptarget,type = "mean_sd")
+```
+
+### Figures
+
+```{r}
+dfirstlooks <- resultsfirstlooks
+m <- dfirstlooks %>%
+  group_by(Experiment, Condition) %>%
+  get_summary_stats(Proportion,type = "mean_se")
+
+m <- dfirstlooks %>%
+  group_by(experiment, trialtype) %>%
+  get_summary_stats(ptarget,type = "mean_se")
+
+flookp <- ggplot(data = dfirstlooks, aes(x=Experiment, y=Proportion)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(aes(fill=Condition), position = position_dodge(0.75),
+               alpha = .05, width = .5) +
+  geom_dotplot(aes(fill=Condition),
+               binaxis='y', stackdir='center',
+               stackratio=0.75, dotsize = 0.75, 
+               position = position_dodge(.75)) +
+  scale_y_continuous(name="Proportion of looks at the action target",
+                     limits=c(-.05, 1.05)) +
+  scale_fill_manual(values = c("black", "orange")) +
+  scale_color_manual(values = c("black", "orange")) +
+  stat_summary(fun.data = mean_se, fill="blue", color = "blue",
+               mapping = aes(group = Condition), position=position_dodge(0.75), shape=18, size = 2) +
+  ggtitle("First looks")
+
+flookp
+```
+
+```{r}
+flookp <- ggplot(data = dfirstlooks, aes(x=experiment, y=ptarget)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(aes(fill=trialtype), position = position_dodge(0.75),
+               alpha = .05, width = .5) +
+  geom_dotplot(aes(fill=trialtype),
+               binaxis='y', stackdir='center',
+               stackratio=0.75, dotsize = 0.75, 
+               position = position_dodge(.75)) +
+  scale_y_continuous(name="Proportion of looks at the action target",
+                     limits=c(-.05, 1.05)) +
+  scale_fill_manual(values = c("black", "orange")) +
+  scale_color_manual(values = c("black", "orange")) +
+  stat_summary(fun.data = mean_se, fill="blue", color = "blue",
+               mapping = aes(group = trialtype), position=position_dodge(0.75), shape=18, size = 2) +
+  ggtitle("First looks")
+
+flookp
+```
+
+
+### Analysis
+
+```{r}
+firstlooke1 <- subset(firstlook, 
+                    (Experiment == "Experiment 1"))
+
+firstlooke2 <- subset(firstlook, 
+                    (Experiment == "Experiment 2"))
+
+firstlooke3 <- subset(firstlook, 
+                    (Experiment == "Experiment 3"))
+
+firstlooke4 <- subset(firstlook, 
+                    (Experiment == "Experiment 4"))
+```
+
+```{r}
+firstlooke1 <- subset(resultsfirstlooks, 
+                    (experiment == 1))
+
+firstlooke2 <- subset(resultsfirstlooks, 
+                    (experiment == 2))
+
+firstlooke3 <- subset(resultsfirstlooks, 
+                    (experiment == 3))
+
+firstlooke4 <- subset(resultsfirstlooks, 
+                    (experiment == 4))
+```
+
+
+```{r warning=FALSE}
+wt <- wilcox.test(ptarget ~ trialtype, data = firstlooke3, alternative = "two.sided",
+                  paired = TRUE,
+                  conf.int = TRUE, conf.level = 0.95, exact = TRUE)
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Comparisons across conditions within each experiment.
+
+Experiment 1.
+
+```{r warning=FALSE}
+wt <- wilcox.test(Proportion ~ Condition, data = firstlooke1, alternative = "two.sided",
+                  paired = TRUE,
+                  conf.int = TRUE, conf.level = 0.95, exact = TRUE)
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Experiment 2.
+```{r}
+t.test(Proportion ~ Condition, data = firstlooke2, paired = TRUE)
+```
+
+Experiment 3.
+```{r warning=FALSE}
+wt <- wilcox.test(Proportion ~ Condition, data = firstlooke3, alternative = "two.sided",
+                  paired = TRUE,
+                  conf.int = TRUE, conf.level = 0.95, exact = TRUE)
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Experiment 4.
+```{r warning=FALSE}
+wt <- wilcox.test(Proportion ~ Condition, data = firstlooke4, alternative = "two.sided",
+                  paired = TRUE,
+                  conf.int = TRUE, conf.level = 0.95, exact = TRUE)
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+#### Comparisons to chance
+##### Trained words
+Experiment 1.
+```{r warning=FALSE}
+aux <- firstlooke1 %>% filter(Condition == "Trained")
+wt <- wilcox.test(aux$Proportion, mu = 0.5, data = firstlooke1, alternative = "two.sided")
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Experiment 2.
+```{r}
+aux <- firstlooke2 %>% filter(Condition == "Trained")
+t.test(aux$Proportion, mu = 0.5, alternative = "two.sided")
+```
+
+Experiment 3.
+```{r warning=FALSE}
+aux <- firstlooke3 %>% filter(Condition == "Trained")
+wt <- wilcox.test(aux$Proportion, mu = 0.5, data = firstlooke1, alternative = "two.sided")
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Experiment 4.
+```{r warning=FALSE}
+aux <- firstlooke4 %>% filter(Condition == "Trained")
+wt <- wilcox.test(aux$Proportion, mu = 0.5, data = firstlooke1, alternative = "two.sided")
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+##### Novel word
+
+Experiment 1.
+```{r}
+aux <- firstlooke1 %>% filter(Condition == "Novel")
+t.test(aux$Proportion, mu = 0.5, alternative = "two.sided")
+```
+
+Experiment 2.
+```{r}
+aux <- firstlooke2 %>% filter(Condition == "Novel")
+t.test(aux$Proportion, mu = 0.5, alternative = "two.sided")
+```
+
+Experiment 3.
+```{r warning=FALSE}
+aux <- firstlooke3 %>% filter(Condition == "Novel")
+wt <- wilcox.test(aux$Proportion, mu = 0.5, alternative = "two.sided")
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+Experiment 4.
+```{r warning=FALSE}
+aux <- firstlooke4 %>% filter(Condition == "Novel")
+wt <- wilcox.test(aux$Proportion, mu = 0.5, alternative = "two.sided")
+Zstat<-qnorm(wt$p.value/2)
+wt
+Zstat
+```
+
+
+# Manuscript figure
+
+```{r}
+pdfs <- ggarrange(ppnaming, ppretest,
+                  labels = c("B", "C"),
+                  font.label = list(size = 20, color = "black"),
+                  ncol = 2, widths = c(1,1))
+```
+
+
+```{r echo=FALSE}
+figure3 <- ggarrange(flookp,NULL,pdfs,
+          ncol = 1, heights = c(1, 0.1, 1),
+          labels = c("A", " "),
+          font.label = list(size = 20, color = "black"),
+          common.legend = TRUE, legend = "bottom") +
+  theme(legend.text = element_text(color = "red", size = 40))
+
+figure3
+```
+
+```{r include=FALSE}
+ggsave("plots/figure3.png", plot = last_plot(), width = 35, height = 30, units = c("cm"))
+```

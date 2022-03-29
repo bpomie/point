@@ -1,0 +1,658 @@
+---
+title: "POINT"
+author: "blinded"
+output: html_document
+---
+
+Output file: datadftest.xlsx
+
+Libraries and set up.
+```{r message=FALSE, warning=FALSE, , paged.print=FALSE, include=FALSE}
+library(readxl)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(eyetrackingR)
+library(kableExtra)
+```
+
+```{r}
+library(polypoly)
+library(AICcmodavg)
+```
+
+Read in individual data from data/dataindividual
+```{r warning=FALSE, include=FALSE}
+setwd("~/Documents/GitHub/point/data/dataraw/")
+results = read_xlsx("datacombined.xlsx",sheet="data", na = "NaN")
+```
+
+# Difference scores
+
+Compute difference scores.
+```{r}
+df <- results %>%
+  group_by(experiment,ID,trial,trialtype,timebin,attBeforeTest) %>%
+  summarise(sumtghits = sum(tghit,na.rm=TRUE), 
+            sumdthits = sum(dthit,na.rm=TRUE), 
+            sumcenterhits = sum(centerhit, na.rm = TRUE),
+            sumhits = sumtghits+sumdthits,
+            countna = sum(missingdata),
+            .groups = "keep") %>%
+  mutate(df = (sumtghits-sumdthits)/(sumtghits+sumdthits)) %>%
+  select(experiment, ID, trial, trialtype, timebin, df, countna, attBeforeTest, sumtghits, sumdthits) %>%
+  pivot_wider(names_from = "timebin",  values_from = c("df","countna","sumtghits","sumdthits"), values_fn = unique) %>%
+  mutate(
+         totalna = (sum = sum(across(starts_with("countna_b")), na.rm = T)),
+         totaltg = (sum = sum(across(starts_with("sumtghits_b")), na.rm = T)),
+         totaldt = (sum = sum(across(starts_with("sumdthits_b")), na.rm = T)),
+         dftrial = (totaltg-totaldt)/(totaltg+totaldt),
+         proptrial = totaltg/(totaltg+totaldt),
+         onscreenTest = 1-(totalna/300),
+         attTest = ifelse(onscreenTest < .5, 0,1),
+         inclusion = ifelse(attBeforeTest == 0 | attTest == 0, 0, 1)) 
+
+auxdf <- df %>% ungroup %>% select(experiment,ID,trial, inclusion)
+results <- merge(results, auxdf, by = c("experiment","ID","trial"))
+remove(auxdf)
+```
+
+Compute average difference scores for each participant (by averaging across trials within each condition).
+Include only trials with a minimum 50% onscreen data during both pretest and test.
+
+```{r}
+meandf <- df %>%
+  filter(inclusion == 1) %>%
+  group_by(experiment,ID,trialtype) %>%
+  summarize(dfbin1 = mean(df_bin1,na.rm=TRUE),
+            dfbin2 = mean(df_bin2,na.rm=TRUE), 
+            dfbin3 = mean(df_bin3,na.rm=TRUE),
+            dfbin4 = mean(df_bin4,na.rm=TRUE),
+            dfbin5 = mean(df_bin5,na.rm=TRUE),
+            dftrial = mean(dftrial,na.rm=TRUE),
+            proptrial = mean(proptrial, na.rm=TRUE),
+            .groups = "keep")
+
+colnames(meandf)[1] <- "Experiment"
+colnames(meandf)[2] <- "Subject"
+colnames(meandf)[3] <- "Condition"
+```
+
+```{r}
+meandf %>%
+  group_by(Experiment,Condition) %>%
+  get_summary_stats(dfbin1, dfbin2, dfbin3, dfbin4, dftrial, type="mean_sd")
+```
+
+Save the data.
+```{r}
+library(openxlsx)
+
+meandf$Condition <- factor(meandf$Condition, 
+                           levels = c("Trained", "Untrained"),
+                           labels = c("Trained", "Novel"))
+
+write.xlsx(meandf, "data/datadftest.xlsx", sheetName = "data")
+```
+
+# Screen attendance
+
+Compute screen attendance during the test measurement period.
+
+```{r}
+df %>%
+  filter(inclusion == 1) %>%
+  group_by(experiment,ID,trialtype) %>%
+  get_summary_stats(onscreenTest, type = "mean_sd") %>%
+  group_by(experiment,trialtype) %>%
+  summarise(gmean = round(mean(mean), digits = 2),
+            gmedian = round(median(mean), digits = 2),
+            gsd = round(sd(mean), digits = 2),
+            gmin = round(min(mean), digits = 2),
+            gmax = round(max(mean), digits = 2),
+            .groups = "keep")
+```
+
+# Trial numbers
+
+Included trials.
+
+```{r}
+df %>%
+  select(experiment,ID,trialtype,trial, inclusion) %>%
+  group_by(experiment,trialtype) %>%
+  summarise(sumincl = sum(inclusion), n())
+```
+
+```{r}
+df %>%
+  group_by(experiment,ID,trialtype) %>%
+  summarize(trialnumber = sum(inclusion,na.rm=TRUE), groups = "keep") %>%
+  group_by(experiment,trialtype) %>%
+  get_summary_stats(trialnumber, type = "mean_sd")
+```
+
+# Complementary analyses
+
+Maker 'results' compatible with 'eyetrackingR', filter out the excluded trials.
+AOI : 
+timems : time from trial onset
+
+```{r}
+results <- results %>%
+  mutate(AOI = ifelse(tghit == 1, "target", ifelse(dthit == 1, "distractor", ifelse(centerhit == 1, "center","TrackLoss")))) %>%
+  mutate(TrackLoss = ifelse(missingdata == 1, TRUE, FALSE)) %>%
+  mutate(ActedObj = ifelse(tghit == 1, TRUE, FALSE)) %>%
+  mutate(DistractorObj = ifelse(dthit == 1, TRUE, FALSE)) %>%
+  mutate(timems = sample * 1000/60)
+```
+
+```{r}
+#Include only the trials in which infants attended to the screen for at least 50% of the time
+resultsclean <- results %>% filter(inclusion == 1)
+
+data <- make_eyetrackingr_data(resultsclean,
+                               participant_column = "ID",
+                               trial_column = "trial",
+                               time_column = "timems",
+                               trackloss_column = "TrackLoss",
+                               aoi_columns = c('ActedObj','DistractorObj'),
+                               treat_non_aoi_looks_as_missing = TRUE
+                               )
+
+# subset to response window post word-onset
+response_window <- data %>%
+  mutate(Target = trialtype)
+
+response_window <- subset_by_window(data, 
+                                    window_start_time = 0, 
+                                    window_end_time = 5000, 
+                                    rezero = FALSE) %>%
+  mutate(Target = trialtype)
+```
+
+## Time course plots
+
+```{r}
+sizebin = 50 #50 ms
+
+auxd <- make_time_sequence_data(response_window, time_bin_size = sizebin, 
+                                 predictor_columns = c("Target"),
+                                 aois = c("DistractorObj")
+                            )
+
+response_time <- make_time_sequence_data(response_window, time_bin_size = sizebin, 
+                                 predictor_columns = c("Target"),
+                                 aois = c("ActedObj")
+                            ) %>%
+  mutate(SamplesDistractor = auxd$SamplesInAOI) %>%
+  mutate(SamplesTarget = SamplesInAOI) %>%
+  mutate(DiffScore = (SamplesTarget-SamplesDistractor)/(SamplesTarget+SamplesDistractor)) %>%
+  mutate(ID = as.numeric(ID)) %>%
+  mutate(experiment = ifelse((ID<17),1,ifelse((ID<33),2,(ifelse(ID<49,3,4))))) %>%
+  mutate(ID = as.factor(ID))
+```
+
+
+```{r}
+mresponse_time <- response_time %>%
+  dplyr::select(experiment,ID,Target,trial,Time,DiffScore) %>%
+  group_by(experiment,ID,Target,Time) %>%
+  summarise(meandfind = mean(DiffScore, na.rm = TRUE)) %>%
+  group_by(experiment,Target,Time) %>%
+  #summarise(meandfexp = mean(meandfind, na.rm = TRUE))
+  get_summary_stats(meandfind, type="mean_se") 
+
+mresponse_time$experiment <- factor(mresponse_time$experiment,
+                                    labels = c("Experiment 1", "Experiment 2", "Experiment 3", "Experiment 4"))
+
+new_theme <- theme_light() +
+  theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="white"),
+                panel.grid.major.x = element_line(colour="gray80", linetype = "longdash"),
+                panel.grid.minor.y = element_blank(),        
+                panel.grid.minor.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=12),
+                axis.text.x = element_text(size=12),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20))
+
+theme_set(new_theme)
+
+ptimecourse <- ggplot(data=mresponse_time, aes(x = Time, y = mean, color = Target)) +
+  theme(
+    strip.text.x = element_text(color = "black", size = 16, hjust = 0),
+    strip.background = element_rect(fill = "white"),
+    axis.title.x = element_text(size=16,face="bold"),
+    legend.position = "bottom"
+  ) +
+  geom_vline(xintercept = 1500, linetype = "longdash", size = .35, color = "red") +
+  geom_vline(xintercept = 3500, linetype = "longdash", size = .35, color = "red") +
+  geom_hline(yintercept = 0, size = .35) +
+  geom_line() +
+  geom_ribbon(aes(ymin = mean - se, ymax = mean + se, fill = Target), alpha = 0.2, colour = NA) +
+  scale_fill_manual(values = c("steelblue", "orange"),
+                    name = "Condition", labels = c("Trained word", "Novel word")) +
+  scale_color_manual(values = c("steelblue", "orange"),
+                     name = "Condition", labels = c("Trained word", "Novel word")) +
+  scale_y_continuous(name="Difference score", limits=c(-1.05, 1.05)) +
+  scale_x_continuous(name="Time (ms)", limits=c(0, 5000), expand = c(0,0)) +
+  facet_wrap(. ~ experiment, ncol = 1) 
+
+ptimecourse
+```
+
+
+## Growth-curve analysis
+
+```{r}
+library(lme4)
+```
+
+```{r}
+# sum-code and center our predictor:
+response_time$TargetC <- ifelse(response_time$Target == 'Trained', .5, -.5)
+response_time$TargetC <- as.numeric(scale(response_time$TargetC, center=TRUE, scale=FALSE))
+```
+
+
+```{r}
+response_time_e1 <- response_time %>% filter(experiment == 1)
+response_time_e2 <- response_time %>% filter(experiment == 2)
+response_time_e3 <- response_time %>% filter(experiment == 3)
+response_time_e4 <- response_time %>% filter(experiment == 4)
+```
+
+### Experiments
+
+#### E1
+
+```{r}
+modelgca_e1 <- lmerTest::lmer(Elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + ot1 + ot2 + ot3 + ot4 | ID), 
+                      data = response_time_e1,
+                      control=lmerControl(optimizer="bobyqa"),
+                      REML = FALSE)
+
+broom.mixed::tidy(modelgca_e1, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+plot(response_time, predictor_column = "Target", dv = "Elog", model = modelgca_e1) +
+  theme_light()
+```
+
+```{r}
+modelfits1 <- predictSE(modelgca_e1, response_time_e1)
+modelfitse1 <- modelfits1 %>%
+  bind_cols(response_time_e1) %>%
+  mutate(se = se.fit) %>%
+  mutate(ymin=fit-se, ymax=fit+se, inv_elog = exp(Elog)/(1+exp(Elog))) %>%
+  mutate(experiment = 1)
+```
+
+#### E2
+
+```{r}
+modelgca_e2 <- lmerTest::lmer(Elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + ot1 + ot2 + ot3 + ot4 | ID), 
+                      data = response_time_e2,
+                      control=lmerControl(optimizer="bobyqa"),
+                      REML = FALSE)
+
+broom::tidy(modelgca_e2, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+plot(response_time_e2, predictor_column = "Target", dv = "Elog", model = modelgca_e2) +
+  theme_light()
+```
+```{r}
+modelfits2 <- predictSE(modelgca_e2, response_time_e2)
+modelfitse2 <- modelfits2 %>%
+  bind_cols(response_time_e2) %>%
+  mutate(se = se.fit) %>%
+  mutate(ymin=fit-se, ymax=fit+se, inv_elog = exp(Elog)/(1+exp(Elog))) %>%
+  mutate(experiment = 2)
+```
+
+
+#### E3
+
+```{r}
+modelgca_e3 <- lmerTest::lmer(Elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + ot1 + ot2 + ot3 + ot4 | ID), 
+                      data = response_time_e3,
+                      control=lmerControl(optimizer="bobyqa"),
+                      REML = FALSE)
+
+broom::tidy(modelgca_e3, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+plot(response_time_e3, predictor_column = "Target", dv = "Elog", model = modelgca_e3) +
+  theme_light()
+```
+
+```{r}
+modelfits3 <- predictSE(modelgca_e3, response_time_e3)
+modelfitse3 <- modelfits3 %>%
+  bind_cols(response_time_e3) %>%
+  mutate(se = se.fit) %>%
+  mutate(ymin=fit-se, ymax=fit+se, inv_elog = exp(Elog)/(1+exp(Elog))) %>%
+  mutate(experiment = 3)
+```
+
+#### E4
+
+```{r}
+modelgca_e4 <- lmerTest::lmer(Elog ~ TargetC*(ot1 + ot2 + ot3 + ot4) + (1 + ot1 + ot2 + ot3 + ot4 | ID), 
+                      data = response_time_e4,
+                      control=lmerControl(optimizer="bobyqa"),
+                      REML = FALSE)
+
+# cleanly show important parts of model (see `summary()` for more)
+broom::tidy(modelgca_e4, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+plot(response_time_e4, predictor_column = "Target", dv = "Elog", model = modelgca_e4) +
+  theme_light()
+```
+
+```{r}
+modelfits4 <- predictSE(modelgca_e4, response_time_e4)
+modelfitse4 <- modelfits4 %>%
+  bind_cols(response_time_e4) %>%
+  mutate(se = se.fit) %>%
+  mutate(ymin=fit-se, ymax=fit+se, inv_elog = exp(Elog)/(1+exp(Elog))) %>%
+  mutate(experiment = 4)
+```
+
+### GCA plots
+
+```{r}
+modelfits <- rbind(modelfitse1,modelfitse2,modelfitse3,modelfitse4) 
+
+modelfits <- modelfits %>%
+  mutate(experiment = as.factor(experiment)) %>%
+  mutate(experiment = recode(experiment, `1` = "Experiment 1", `2` = "Experiment 2", 
+                             `3` = "Experiment 3", `4` = "Experiment 4"))
+```
+
+```{r}
+pgca <- ggplot(modelfits, aes(x=Time, y=fit, shape=Target, fill=Target, color=Target)) +
+  theme(
+    strip.text.x = element_text(color = "black", size = 16, hjust = 0),
+    strip.background = element_rect(fill = "white"),
+    axis.title.x = element_text(size=16,face="bold"),
+    legend.position = "bottom"
+  ) +
+  geom_ribbon(aes(ymin=ymin, ymax=ymax),alpha=.2, color=NA)+
+  geom_line() +
+  geom_hline(yintercept = 0, size = .35) +
+  stat_summary(data=modelfits,
+               aes(x=Time, y=Elog), fun.y=mean, geom="point",
+               alpha=0.6, size=.75) +
+  geom_vline(xintercept = 1500, linetype = "longdash", size = .35, color = "red") +
+  geom_vline(xintercept = 3500, linetype = "longdash", size = .35, color = "red") +
+  scale_fill_manual(values = c("steelblue4", "orange4")) +
+  scale_color_manual(values = c("steelblue4", "orange4")) +
+  scale_y_continuous(name="E-log transformed \nproportion of target looking") + #, limits=c(-1.05, 1.05)) +
+  scale_x_continuous(name="Time (ms)", limits=c(0, 5000), expand = c(0,0)) +
+  facet_wrap(. ~ experiment, ncol = 1)
+  facet_wrap(. ~ experiment, ncol = 1)
+  
+pgca
+```
+
+## Figure 3
+```{r}
+ggarrange(ptimecourse, NULL, pgca, widths = c(1,.05,.75),
+          ncol = 3,
+          labels = c("A"," ", "B"),
+          common.legend = T, legend = "bottom")
+
+ggsave("plots/figure_timecourse.png", plot = last_plot(), width = 30, height = 20, units = c("cm"))
+```
+
+## Cluster-based permutation analysis
+
+```{r}
+library(pbapply)
+```
+
+```{r}
+# aggregate across trials within subjects in time analysis
+aux_d_byID <- make_time_sequence_data(response_window, time_bin_size = sizebin, 
+                                 predictor_columns = c("Target"),
+                                 aois = c("DistractorObj"),
+                                 summarize_by = "ID"
+                            )
+
+response_time_byID <- make_time_sequence_data(response_window, time_bin_size = sizebin, 
+                                 predictor_columns = c("Target"),
+                                 aois = "ActedObj",
+                                 summarize_by = "ID"
+                            ) %>%
+  mutate(SamplesDistractor = aux_d_byID$SamplesInAOI) %>%
+  mutate(SamplesTarget = SamplesInAOI) %>%
+  mutate(DiffScore = (SamplesTarget-SamplesDistractor)/(SamplesTarget+SamplesDistractor)) %>%
+  mutate(DiffScoreConstant = ifelse(SamplesTotal > 0, 0,NaN)) %>%
+  mutate(ID = as.numeric(ID)) %>%
+  mutate(experiment = ifelse((ID<17),1,ifelse((ID<33),2,(ifelse(ID<49,3,4))))) %>%
+  mutate(ID = as.factor(ID))
+```
+
+```{r}
+rtIDe1 <- response_time_byID %>% filter(experiment == 1)
+rtIDe2 <- response_time_byID %>% filter(experiment == 2)
+rtIDe3 <- response_time_byID %>% filter(experiment == 3)
+rtIDe4 <- response_time_byID %>% filter(experiment == 4)
+```
+
+
+```{r}
+num_sub = 16 #length(unique((response_time_e1$ID)))
+threshold_t = qt(p = 1 - .05/2, 
+                 df = num_sub-1) # pick threshold t based on alpha = .05 two tailed
+```
+
+#### E1 
+
+```{r}
+df_timeclust <- make_time_cluster_data(rtIDe1, 
+                                      test= "t.test", paired=TRUE,
+                                      predictor_column = "Target", 
+                                      threshold = 2,
+                                      formula = DiffScore ~ Target)
+
+plot(df_timeclust) + ylab("T-Statistic") + theme_light()
+
+summary(df_timeclust)
+
+clust_analysis <- analyze_time_clusters(df_timeclust, within_subj=TRUE, paired=TRUE,
+                                        samples=1000)
+
+plot(clust_analysis) + theme_light()
+summary(clust_analysis)
+```
+#### E2
+
+```{r}
+df_timeclust <- make_time_cluster_data(rtIDe2, 
+                                      test= "t.test", paired=TRUE,
+                                      predictor_column = "Target", 
+                                      threshold = 2,
+                                      formula = DiffScore ~ Target) 
+
+plot(df_timeclust) + ylab("T-Statistic") + theme_light()
+
+summary(df_timeclust)
+
+clust_analysis <- analyze_time_clusters(df_timeclust, within_subj=TRUE, paired=TRUE,
+                                        samples=1000)
+
+plot(clust_analysis) + theme_light()
+summary(clust_analysis)
+```
+
+#### E3
+
+```{r}
+df_timeclust <- make_time_cluster_data(rtIDe3, 
+                                      test= "t.test", paired=TRUE,
+                                      predictor_column = "Target", 
+                                      threshold = 2,
+                                      formula = DiffScore ~ Target) 
+plot(df_timeclust) + ylab("T-Statistic") + theme_light()
+
+summary(df_timeclust)
+
+clust_analysis <- analyze_time_clusters(df_timeclust, within_subj=TRUE, paired=TRUE,
+                                        samples=1000) # in practice, you should use a lot more
+
+plot(clust_analysis) + theme_light()
+summary(clust_analysis)
+```
+
+#### E4
+
+```{r}
+df_timeclust <- make_time_cluster_data(rtIDe4, 
+                                      test= "t.test", paired=TRUE,
+                                      predictor_column = "Target", 
+                                      threshold = 2,
+                                      formula = DiffScore ~ Target) 
+plot(df_timeclust) + ylab("T-Statistic") + theme_light()
+
+summary(df_timeclust)
+
+clust_analysis <- analyze_time_clusters(df_timeclust, within_subj=TRUE, paired=TRUE,
+                                        samples=1000) # in practice, you should use a lot more
+
+plot(clust_analysis) + theme_light()
+summary(clust_analysis)
+```
+
+## Test onset analysis
+
+This analysis summarizes where infants looked at the begining of the test measurement period and how rapidly they sacccaded to one of the objects.
+
+```{r}
+library(data.table)
+
+resultsvisits<-resultsclean %>%
+  group_by(experiment,ID,trial) %>%
+  mutate(visitID = rleid(AOI)) %>%
+  group_by(experiment,ID,trial,visitID) %>% 
+        mutate(frameStart = min(sample),
+               frameEnd = max(sample)) %>%
+                    filter(sample == min(sample)) %>%
+                mutate(visitDuration = frameEnd - frameStart+1,
+                       visitms = visitDuration*1000/60) %>%
+                    select(ID, trial, trialtype, timebin, visitID, AOI, visitDuration, visitms, frameStart, frameEnd, timems)
+
+#Compute the number of contributed trials
+contributedtrials <- resultsclean %>%
+  group_by(experiment,ID) %>%
+  summarise(ctrials = n_distinct(trial))
+
+##
+
+resultsfirstlooks <- resultsvisits %>%
+  filter(AOI == "target" | AOI == "distractor") %>%
+  group_by(experiment,ID,trial,trialtype) %>%
+  mutate(visitObjectID = rleid(visitID)) %>%
+  filter(visitObjectID == 1) %>%
+  mutate(latency = frameStart*1000/60) %>%
+  group_by(experiment,ID,trialtype) %>%
+  summarise(target = sum(AOI %in% c("target")), 
+            distractor = sum(AOI %in% c("distractor")),
+            ptarget = target/(target+distractor),
+            mlatency = mean(latency)) 
+
+resultsfirstlooks %>%
+  group_by(experiment, trialtype) %>%
+  summarise(ptargetgav = mean(ptarget),
+            latencygav = mean(mlatency))
+
+resultsfirstlooks %>%
+  group_by(experiment) %>%
+  summarise(ptargetgav = mean(ptarget),
+            latencygav = mean(mlatency)) 
+
+resultsvisits <- merge(resultsvisits,contributedtrials,by = c("experiment","ID"))
+
+resultsvisits %>%
+  filter(AOI == "center") %>%
+  group_by(experiment,trialtype) %>%
+  summarise(mean(visitms), min(visitms), max(visitms))
+
+resultsvisits %>%
+  filter(AOI == "center") %>%
+  group_by(experiment,trialtype) %>%
+  ggplot(aes(x = as.factor(experiment), y = visitms, color = as.factor(experiment), fill=experiment)) +
+  theme_light() +
+  geom_boxplot() +
+  #geom_jitter(size = .5) +
+  stat_summary(fun.data = mean_se, color = "black",shape=18, size = 1, position=position_dodge(.75)) +
+  ggtitle("Duration of central fixation at the trial onset") +
+  facet_grid(. ~ trialtype)
+  
+auxbis <- resultsvisits %>%
+  group_by(experiment,ID,trial) %>%
+  filter(visitID %in% c(1)) %>%
+  arrange(ID) %>%
+  group_by(experiment,ID,AOI,ctrials) %>%
+  summarise(a = n()) %>%
+  pivot_wider(names_from = "AOI", values_from = c("a"), values_fn = unique) 
+
+names(auxbis)[5] <- "nodata"
+
+auxbis[is.na(auxbis)] <- 0
+
+auxbis %>%
+  mutate(pcenter = ifelse(is.na(center),0,center/ctrials),
+         ptarget = ifelse(is.na(target),0,target/ctrials),
+         pdistractor = ifelse(is.na(distractor),0,distractor/ctrials),
+         pelse = ifelse(is.na(TrackLoss),0,TrackLoss/ctrials),
+         pnodata = ifelse(is.na(nodata),0,nodata/ctrials)) %>%
+  gather(key = "AOI", value=trialproportion, c("pcenter", "ptarget", "pdistractor", "pelse", "pnodata")) %>%
+  group_by(experiment,AOI) %>% 
+  summarise(trialproportion = mean(trialproportion)) 
+
+auxbis %>%
+  mutate(pcenter = ifelse(is.na(center),0,center/ctrials),
+         ptarget = ifelse(is.na(target),0,target/ctrials),
+         pdistractor = ifelse(is.na(distractor),0,distractor/ctrials),
+         pelse = ifelse(is.na(TrackLoss),0,TrackLoss/ctrials),
+         pnodata = ifelse(is.na(nodata),0,nodata/ctrials)) %>%
+  gather(key = "AOI", value=trialproportion, c("pcenter", "ptarget", "pdistractor", "pelse", "pnodata")) %>%
+  mutate(AOI = as.factor(AOI)) %>%
+  mutate(AOI = recode(AOI, `pcenter` = "Center (attention getter)", `ptarget` = "Target", 
+                             `pdistractor` = "Distractor", `pelse` = "Else", `pnodata` = "No data available")) %>%
+  group_by(experiment,AOI) %>%
+  ggplot(aes(x = as.factor(experiment), y = trialproportion, color = AOI, fill = AOI)) +
+  theme_light() +
+  geom_boxplot(alpha = .2) +
+  stat_summary(fun.data = mean_se, color = "black",shape=18, size = .55, position=position_dodge(.75)) +
+  scale_y_continuous(name="Proportion of valid trials") + #, limits=c(-1.05, 1.05)) +
+  xlab("Experiment") +#, limits=c(0, 5000), expand = c(0,0)) +
+  ggtitle("Location of gaze at the onset of the test measurement period") 
+
+ggsave("plots/figure_s2.png", plot = last_plot(), width = 20, height = 10, units = c("cm"))
+```
+
+

@@ -1,0 +1,1198 @@
+---
+title: "Main analysis | POINT | Nonverbal action interpretation guides novel word disambiguation in 12-month-olds"
+author: /
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+# Data structure
+
+data_differencescores.xlsx contains:
+
+* $Experiment$       -- Experiment 1, Experiment 2, Experiment 3, Experiment 4 
+* $ID$               -- unique ID identifying each participant
+* $Condition$         -- word heard at test (trained v. novel)
+* $dfbin1$     --  difference scores in time bin 1
+* $dfbin2$     --  difference scores in time bin 2
+* $dfbin3$     --  difference scores in time bin 3
+* $dfbin4$     --  difference scores in time bin 4
+* $dfbin5$     --  difference scores in time bin 4
+* $dftrial$
+* $proptrial$
+
+# Libraries and set up
+```{r message=FALSE, warning=FALSE, , paged.print=FALSE}
+library(tidyverse)
+library(readxl)
+library(rstatix)
+library(ggpubr)
+library(emmeans)
+library(afex)
+library(sjstats)
+library(lsr)
+library(sjPlot) # making tables
+library(kableExtra) # making tables
+library(broom)
+library(broom.mixed)
+library(thinkr)
+```
+
+# Load data
+
+Load the data.
+
+```{r }
+#Difference scores
+df <- read_excel("data/datadftest.xlsx",
+                      sheet="data", na = "NaN")
+```
+
+Prepare the dataset.
+```{r }
+#Convert Condtition, Id, Experiment, Trial as factor
+df$Condition <- factor(df$Condition, levels = c("Trained","Novel"))
+df$Subject <- factor(df$Subject)
+df$Experiment <- factor(df$Experiment,
+                             levels = c(1,2,3,4),
+                             labels = c("Experiment 1", "Experiment 2",
+                                        "Experiment 3", "Experiment 4"))
+
+dflong <- df %>% 
+  gather(key="Time", value="DiffScore", c("dfbin1","dfbin2","dfbin3", "dfbin4","dfbin5")) %>%
+  mutate(Time = factor(Time, ordered = TRUE,
+                      levels = c("dfbin1","dfbin2","dfbin3", "dfbin4", "dfbin5"),
+                      labels = c("0-1 s", "1-2 s", "2-3 s", "3-4 s", "4-5 s")))
+
+#Check the data structure
+str(dflong)
+```
+
+```{r}
+e1data <- subset(dflong, Experiment == "Experiment 1") 
+e2data <- subset(dflong, Experiment == "Experiment 2") 
+e3data <- subset(dflong, Experiment == "Experiment 3")
+e4data <- subset(dflong, Experiment == "Experiment 4")
+```
+
+
+# Experiment 1 (Point + Name)
+
+```{r }
+head(e1data)
+```
+### Descriptive statistics
+Compute the summary descriptive statistics.
+```{r echo=FALSE}
+e1data %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_sd")
+```
+
+### Normality
+
+Perform the Shapiro-Wilk test of normality.
+
+```{r echo=FALSE}
+#Normality
+e1data %>%
+  group_by(Condition, Time) %>%
+  shapiro_test(DiffScore)
+```
+
+Draw the histograms of the data.
+
+```{r echo=FALSE, warning=FALSE}
+p <- gghistogram(e1data, x = "DiffScore",
+                 ggtheme = theme_pubclean(),
+                 add = "mean", rug = TRUE, bins = "8",
+                 color = "Condition", fill = "Condition", alpha = .2,
+                 palette = c("#00AFBB", "#E7B800"),
+                 xlab = "Difference Score") +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+
+p + 
+  font("x.text", size = 6.5) 
+```
+
+
+Draws the correlation between the data and the normal distribution.
+
+```{r echo=FALSE, warning=FALSE}
+ggqqplot(e1data, "DiffScore", ggtheme = theme_pubclean()) +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+```
+
+### GLMM (resubmission)
+
+```{r}
+me1.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1data, REML = FALSE)
+me1.fit2 <- lmer(DiffScore ~ Condition+Time + (1|Subject), data = e1data, REML = FALSE)
+me1.fit3 <- lmer(DiffScore ~ Condition*Time + (1|Subject), data = e1data, REML = FALSE)
+anova(me1.fit1,me1.fit2)
+anova(me1.fit2,me1.fit3)
+```
+
+```{r}
+summary(me1.fit3)
+shapiro.test(residuals(me1.fit3))
+confint(me1.fit3)
+```
+
+Make a summary table 
+```{r}
+anova(me1.fit3)
+```
+
+```{r}
+tab_model(me1.fit3)
+```
+
+### ANOVA (submission)
+
+A repeated-measures ANOVA with:
+* $condition$ as a within-subject factor
+* $test bin$ (0-1 sec v. 1-2 sec v. 2-3 sec v. 3-4 sec) as a within-subject factor
+
+```{r echo=FALSE, warning=FALSE}
+#Run the analysis
+aux <- e1data %>% 
+  filter(Time != "bin5")
+ae1 <- aov_car(DiffScore ~ Time*Condition + Error(Subject/Time*Condition), 
+                   data = aux, type = 3)
+#Display the results
+summary(ae1)
+eta_sq(ae1, partial = TRUE)
+cohens_f(ae1, partial = TRUE)
+```
+
+### Figures
+
+```{r }
+e1plot <- e1data 
+
+e1plot$Time <- factor(e1plot$Time, 
+                      levels = c("0-1 s", "1-2 s", "2-3 s", "3-4 s", "4-5 s"))
+
+e1s <- e1plot %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_se")
+  
+e1s$Time <- factor(e1s$Time)
+```
+
+```{r }
+library(ggrepel)
+library(grid)
+grob <- grobTree(textGrob("Object targeted by the action", x=.6,  y=.9, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+grob2 <- grobTree(textGrob("Distractor", x=.86,  y=.1, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+```
+ 
+#### Line plots
+
+```{r echo=FALSE}
+pe1.l <- ggplot(data = e1s,aes(x=Time, y = mean, color=Condition,group=Condition)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20),
+                plot.subtitle = element_text(size = 16, face = "italic")) +
+  geom_point(size=3) +
+  geom_line(aes(linetype=Condition),size=1) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  scale_y_continuous(name="Difference Score", limits=c(-.8, .8)) +
+  ggtitle("Experiment 1", subtitle = "Pointing + Naming") +
+  annotation_custom(grob) +
+  annotation_custom(grob2)
+
+pe1.l
+```
+
+#### Box plots
+
+```{r}
+b1 <- ggplot(data = e1data, aes(x=Time, y=DiffScore)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 14)) +
+  geom_boxplot(aes(fill=Condition), position = position_dodge(.9), alpha = .05) +
+  geom_jitter(aes(color=Condition),position = position_jitterdodge(.15)) +
+  scale_y_continuous(name="Difference Score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  ggtitle("  \n ")
+
+b1
+```
+
+### Follow-up tests
+
+#### Comparisons between conditions
+
+To solve the significant interaction between condition and time, we conducted paired-samples t tests within each time window.
+
+```{r}
+t.test(DiffScore ~ Condition, data = e1data %>% filter(Time=="0-1 s"), paired = TRUE)
+cohensD(DiffScore ~ Condition, data = e1data %>% filter(Time=="0-1 s"), method = "paired")
+bin1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1data %>% filter(Time=="0-1 s"), REML = FALSE)
+summary(bin1)
+```
+
+During the pretest and remainder of the test, there was no significant differences in response to trained and novel words (all *ps* > .35).
+
+```{r}
+# 1-2 s
+t.test(DiffScore ~ Condition, data = e1data %>% filter(Time=="1-2 s"), paired = TRUE)
+bin2 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1data %>% filter(Time=="1-2 s"), REML = FALSE)
+summary(bin2)
+# 2-3 s
+t.test(DiffScore ~ Condition, data = e1data %>% filter(Time=="2-3 s"), paired = TRUE)
+bin3 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1data %>% filter(Time=="2-3 s"), REML = FALSE)
+summary(bin3)
+# 3-4 s
+t.test(DiffScore ~ Condition, data = e1data %>% filter(Time=="3-4 s"), paired = TRUE)
+# 4-5 s
+t.test(DiffScore ~ Condition, data = e1data %>% filter(Time=="4-5 s"), paired = TRUE)
+```
+
+#### Comparisons to chance
+
+```{r }
+e1_data_trained <- subset(e1data, Condition == "Trained") %>%
+  filter(Time == "0-1 s")
+e1_data_novel <- subset(e1data, Condition == "Novel") %>%
+  filter(Time == "0-1 s")
+```
+
+Time bin 1.
+
+```{r eval=FALSE}
+t.test(e1_data_trained$DiffScore, mu = 0, alternative = "two.sided")
+cohensD(e1_data_trained$DiffScore, mu = 0)
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+cohensD(e1_data_novel$DiffScore, mu = 0)
+```
+
+Time bins 2-4.
+
+```{r eval=FALSE, }
+e1_data_trained <- subset(e1data, Condition == "Trained") %>% filter(Time == "bin2")
+e1_data_novel <- subset(e1data, Condition == "Novel") %>% filter(Time == "bin2")
+t.test(e1_data_trained$DiffScore, mu = 0, alternative = "two.sided")
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+
+e1_data_trained <- subset(e1data, Condition == "Trained") %>% filter(Time == "bin3")
+e1_data_novel <- subset(e1data, Condition == "Novel") %>% filter(Time == "bin3")
+t.test(e1_data_trained$DiffScore, mu = 0, alternative = "two.sided")
+t.test(e1_data_trained$DiffScore, mu = 0, alternative = "two.sided")
+
+e1_data_trained <- subset(e1data, Condition == "Trained") %>% filter(Time == "bin4")
+e1_data_novel <- subset(e1data, Condition == "Novel") %>% filter(Time == "bin4")
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+
+e1_data_trained <- subset(e1data, Condition == "Trained") %>% filter(Time == "bin5")
+e1_data_novel <- subset(e1data, Condition == "Novel") %>% filter(Time == "bin5")
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+t.test(e1_data_novel$DiffScore, mu = 0, alternative = "two.sided")
+```
+
+# Experiment 2 (Grasp + Name)
+
+Select the data from Experiment 2.
+```{r }
+e2data <- subset(dflong, Experiment == "Experiment 2")
+head(e2data)
+```
+
+
+### Descriptive statistics
+
+Compute the summary descriptive statistics for each time bin.
+```{r echo=FALSE}
+# Split by time bin
+e2data %>% 
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_sd")
+
+# Collapsed across time bins
+df %>%
+  filter(Experiment == "Experiment 2") %>%
+  group_by(Condition) %>%
+  get_summary_stats(dftrial,type = "mean_sd")
+```
+
+### Normality
+
+Perform the Shapiro-Wilk test of normality.
+```{r echo=FALSE}
+#Normality
+e2data %>%
+  group_by(Condition, Time) %>%
+  shapiro_test(DiffScore)
+```
+
+Draw the histograms of the data.
+```{r echo=FALSE, warning=FALSE}
+p <- gghistogram(e2data, x = "DiffScore",
+                 ggtheme = theme_pubclean(),
+                 add = "mean", rug = TRUE, bins = "8",
+                 color = "Condition", fill = "Condition", alpha = .2,
+                 palette = c("#00AFBB", "#E7B800"),
+                 xlab = "Difference Score") +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+
+p + 
+  font("x.text", size = 6.5) 
+```
+
+
+Draws the correlation between the data and the normal distribution.
+```{r echo=FALSE, warning=FALSE}
+ggqqplot(e2data, "DiffScore", ggtheme = theme_pubclean()) +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+```
+
+### GLMM (resubmission)
+
+```{r}
+me2.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e2data, REML = FALSE)
+me2.fit2 <- lmer(DiffScore ~ Condition+Time + (1|Subject), data = e2data, REML = FALSE)
+me2.fit3 <- lmer(DiffScore ~ Condition*Time + (1|Subject), data = e2data, REML = FALSE)
+anova(me2.fit1,me2.fit2)
+anova(me2.fit2,me2.fit3)
+```
+
+```{r}
+anova(me2.fit1)
+summary(me2.fit1)
+shapiro.test(residuals(me2.fit3))
+confint(me2.fit1)
+
+broom.mixed::tidy(me2.fit1, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+Residuals.
+
+```{r eval=FALSE, include=FALSE}
+library(broom.mixed)
+
+m <- me2.fit1
+
+df.plot = m %>% 
+  augment() %>% 
+  clean_names() 
+
+# residual plot
+ggplot(df.plot, aes(x = fitted, y = resid)) + 
+  geom_point()
+
+# density of residuals 
+ggplot(df.plot, aes(x = resid)) + 
+  stat_density(geom = "line")
+
+# QQ plot 
+ggplot(df.plot, aes(sample = resid)) + 
+  geom_qq() + 
+  geom_qq_line()
+```
+
+```{r}
+prede2 <- predict(me2.fit1)
+```
+
+Make a summary table 
+```{r}
+anova(me2.fit1) %>% 
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+tab_model(me2.fit1)
+```
+
+### ANOVA (submission)
+
+A repeated-measures ANOVA with:
+* $condition$ as a within-subject factor
+* $test bin$ (0-1 sec v. 1-2 sec v. 2-3 sec v. 3-4 sec) as a within-subject factor
+
+```{r echo=FALSE, warning=FALSE}
+#Run the analysis
+e2bins1to4 <- e2data %>%
+  filter(Time != "bin5")
+
+ae2 <- aov_car(DiffScore ~ Time*Condition + Error(Subject/Time*Condition), 
+                   data = e2bins1to4)
+#Display the results
+summary(ae2)
+eta_sq(ae2, partial = TRUE)
+```
+
+#### Figures
+
+```{r }
+e2plot <- e2data 
+
+e2plot$Time <- factor(e2plot$Time, 
+                      levels = c("0-1 s", "1-2 s", "2-3 s", "3-4 s", "4-5 s"))
+
+e2s <- e2plot %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_se")
+  
+e2s$Time <- factor(e2s$Time)
+```
+
+```{r }
+library(ggrepel)
+library(grid)
+grob <- grobTree(textGrob("Object targeted by the action", x=.6,  y=.9, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+grob2 <- grobTree(textGrob("Distractor", x=.86,  y=.1, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+```
+ 
+##### Line plots
+
+```{r echo=FALSE}
+pe2.l <- ggplot(data = e2s,aes(x=Time, y = mean, color=Condition,group=Condition)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20),
+                plot.subtitle = element_text(size = 16, face = "italic")) +
+  geom_point(size=3) +
+  geom_line(aes(linetype=Condition),size=1) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  scale_y_continuous(name="Difference score", limits=c(-.8, .8)) +
+  ggtitle(label = "Experiment 2", subtitle = "Grasping + Naming") +
+  annotation_custom(grob) +
+  annotation_custom(grob2)
+
+pe2.l
+```
+
+##### Box plots
+```{r}
+b2 <- ggplot(data = e2plot, aes(x=Time, y=DiffScore)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(aes(fill=Condition), position = position_dodge(.9), alpha = .05) +
+  geom_jitter(aes(color=Condition),position = position_jitterdodge(.15)) +
+  scale_y_continuous(name="Difference score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  ggtitle("  \n ")
+
+b2
+```
+
+
+
+### Follow-up tests
+
+#### Difference scores collapsed across time
+
+```{r echo=FALSE}
+#Normality
+df %>%
+  filter(Experiment == "Experiment 2") %>%
+  group_by(Condition) %>%
+  shapiro_test(dftrial)
+```
+
+#### Comparisons to chance
+
+```{r }
+#Trained condition
+t.test(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 2"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 2"], mu = 0)
+
+#Novel condition
+t.test(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 2"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 2"], mu = 0)
+```
+
+# Comparison between Experiments 1-2
+
+## GLMM (resubmission)
+
+```{r}
+e1e2data <- dflong %>%
+  filter(Experiment == "Experiment 1" | Experiment == "Experiment 2") %>%
+  filter(Time == "0-1 s")
+```
+
+```{r}
+mfit.e12 <- lmer(DiffScore ~ Condition * Experiment + (1|Subject), data = e1e2data, REML = FALSE)
+anova(mfit.e12)
+summary(mfit.e12)
+confint(mfit.e12)
+
+broom.mixed::tidy(mfit.e12, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+Residuals.
+
+```{r}
+shapiro.test(residuals(mfit.e12))
+```
+
+
+Make a summary table 
+```{r}
+anova(mfit.e12) %>% 
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+tab_model(mfit.e12)
+```
+
+## Omnibus ANOVA (submission)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+e1e2anova <- subset(dflong, 
+                    (Experiment == "Experiment 1" | Experiment == "Experiment 2")) %>%
+  filter(Time != "bin5")
+        
+ae1e2<-aov_car((DiffScore ~ Time*Condition*Experiment 
+                + Error(Subject/Time*Condition) + Experiment), 
+  data = e1e2anova)
+
+summary(ae1e2)
+eta_sq(ae1e2, partial = TRUE)
+```
+
+### Separate ANOVAs by time bin
+
+Test bin 1 (0-1 s).
+```{r}
+#ANOVA
+ae1e2b1 <- aov_car((DiffScore ~ Condition*Experiment 
+                + Error(Subject/Condition) + Experiment), data = e1e2anova%>%filter(Time == "0-1 s"))
+
+summary(ae1e2b1)
+eta_sq(ae1e2b1, partial = TRUE)
+```
+
+Test bin 2.
+```{r}
+ae1e2b2 <- aov_car((DiffScore ~ Condition*Experiment + Error(Subject/Condition) + Experiment),
+                   data = e1e2anova%>%filter(Time == "1-2 s"))
+
+summary(ae1e2b2)
+```
+
+Test bin 3.
+```{r}
+ae1e2b3 <- aov_car((DiffScore ~ Condition*Experiment + Error(Subject/Condition) + Experiment),
+                   data = e1e2anova%>%filter(Time == "2-3 s"))
+
+summary(ae1e2b3)
+```
+
+Test bin 4.
+```{r}
+#ANOVA
+ae1e2b4 <- aov_car((DiffScore ~ Condition*Experiment + Error(Subject/Condition) + Experiment),
+                   data = e1e2anova%>%filter(Time == "3-4 s"))
+
+summary(ae1e2b4)
+```
+
+# Experiment 3 (Name + Grasp)
+
+## Descriptive statistics
+Compute the summary descriptive statistics.
+```{r echo=FALSE}
+e3data %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_sd")
+
+# Collapsed across time bins
+df %>%
+  filter(Experiment == "Experiment 3") %>%
+  group_by(Condition) %>%
+  get_summary_stats(dftrial,type = "mean_sd")
+```
+
+## Normality
+
+Perform the Shapiro-Wilk test of normality.
+```{r echo=FALSE}
+#Normality
+e3data %>%
+  group_by(Condition, Time) %>%
+  shapiro_test(DiffScore)
+```
+
+Draw the histograms of the data.
+```{r echo=FALSE, warning=FALSE}
+p <- gghistogram(e3data, x = "DiffScore",
+                 ggtheme = theme_pubclean(),
+                 add = "mean", rug = TRUE, bins = "8",
+                 color = "Condition", fill = "Condition", alpha = .2,
+                 palette = c("#00AFBB", "#E7B800"),
+                 xlab = "Difference Score") +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+
+p + 
+  font("x.text", size = 6.5) 
+```
+
+
+Draws the correlation between the data and the normal distribution.
+```{r echo=FALSE, warning=FALSE}
+ggqqplot(e3data, "DiffScore", ggtheme = theme_pubclean()) +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+```
+
+## GLMM (resubmission)
+
+```{r}
+me3.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e3data, REML = FALSE)
+me3.fit2 <- lmer(DiffScore ~ Condition+Time + (1|Subject), data = e3data, REML = FALSE)
+me3.fit3 <- lmer(DiffScore ~ Condition*Time + (1|Subject), data = e3data, REML = FALSE)
+anova(me3.fit1,me3.fit2)
+anova(me3.fit2,me3.fit3)
+```
+
+```{r}
+anova(me3.fit1)
+summary(me3.fit1)
+confint(me3.fit1)
+shapiro.test(residuals(me3.fit1))
+
+broom.mixed::tidy(me3.fit1, effects = "fixed") %>%
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+
+Make a summary table 
+```{r}
+anova(me3.fit1) %>% 
+  kable(digits = 3) %>% 
+  kable_styling(bootstrap_options = "striped",
+                full_width = F)
+```
+
+```{r}
+tab_model(me3.fit1)
+```
+
+## ANOVA
+
+A repeated-measures ANOVA with:
+* $condition$ (trained v. novel word) as a within-subject factor
+* $time$ (test bin 1 v. test bin 2 v. test bin 3 v. test bin 4) as a within-subject factor
+
+```{r echo=FALSE, warning=FALSE}
+#Run the analysis
+e3anova <- subset(e3data, Time != "bin5")
+
+ae3 <- aov_car(DiffScore ~ Time*Condition + Error(Subject/Time*Condition), 
+                   data = e3anova)
+#Display the results
+summary(ae3)
+eta_sq(ae3, partial = TRUE)
+```
+
+### Figures
+
+```{r }
+e3plot <- e3data 
+
+e3plot$Time <- factor(e3plot$Time, 
+                       levels = c("0-1 s","1-2 s","2-3 s", "3-4 s", "4-5 s"))
+
+e3s <- e3plot %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_se")
+  
+e3s$Time <- factor(e3s$Time)
+```
+
+```{r }
+library(ggrepel)
+library(grid)
+grob <- grobTree(textGrob("Object targeted by the action", x=.6,  y=.9, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+grob2 <- grobTree(textGrob("Distractor", x=.86,  y=.1, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+```
+ 
+#### Line plots
+
+```{r echo=FALSE}
+pe3.l <- ggplot(data = e3s,aes(x=Time, y = mean, color=Condition,group=Condition)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20),
+                plot.subtitle = element_text(size = 16, face = "italic")) +
+  geom_point(size=3) +
+  geom_line(aes(linetype=Condition),size=1) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  scale_y_continuous(name="Difference Score", limits=c(-.8, .8)) +
+  ggtitle("Experiment 3", subtitle = "Naming + Grasping") +
+  annotation_custom(grob) +
+  annotation_custom(grob2)
+
+pe3.l
+```
+
+#### Box plots
+
+```{r}
+b3 <- ggplot(data = e3data, aes(x=Time, y=DiffScore)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 14)) +
+  geom_boxplot(aes(fill=Condition), position = position_dodge(.9), alpha = .05) +
+  geom_jitter(aes(color=Condition),position = position_jitterdodge(.15)) +
+  scale_y_continuous(name="Difference Score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  ggtitle("  \n ")
+
+b3
+```
+
+## Follow-up tests
+
+#### Average over time
+
+Descriptive statistics.
+```{r echo=FALSE}
+e3datatimeave <-e3data %>%
+  group_by(Subject,Condition) %>%
+  summarize(avedf = mean(DiffScore, na.rm=T))
+
+e3datatimeave %>%
+  group_by(Condition) %>%
+  get_summary_stats(avedf, type="mean_sd")
+```
+
+```{r echo=FALSE}
+#Normality
+e3datatimeave %>%
+  group_by(Condition) %>%
+  shapiro_test(avedf)
+```
+
+### Comparisons to chance
+
+```{r }
+#Trained condition
+t.test(e3datatimeave$avedf[e3datatimeave$Condition == "Trained"], mu = 0, alternative = "two.sided")
+cohensD(e3datatimeave$avedf[e3datatimeave$Condition == "Trained"], mu = 0)
+
+#Novel condition
+t.test(e3datatimeave$avedf[e3datatimeave$Condition == "Novel"], mu = 0, alternative = "two.sided")
+cohensD(e3datatimeave$avedf[e3datatimeave$Condition == "Novel"], mu = 0)
+```
+
+```{r }
+#Trained condition
+t.test(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 3"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 3"], mu = 0)
+
+#Novel condition
+t.test(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 3"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 3"], mu = 0)
+```
+
+
+### Comparison between Experiments 2-3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+e2e3data <- subset(dflong, (Experiment == "Experiment 2" | Experiment == "Experiment 3")) %>%
+  filter(Time == "0-1 s")
+        
+ae2e3<-aov_car((DiffScore ~ Condition*Experiment 
+                + Error(Subject/Condition) + Experiment), data = e2e3data)
+
+summary(ae2e3)
+eta_sq(ae2e3, partial = TRUE)
+```
+
+
+```{r}
+e2e3data <- dflong %>%
+  filter(Experiment == "Experiment 2" | Experiment == "Experiment 3") %>%
+  filter(Time == "0-1 s")
+```
+
+
+```{r}
+me23.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e2e3data, REML = FALSE)
+me23.fit2 <- lmer(DiffScore ~ Condition + Experiment + (1|Subject), data = e2e3data, REML = FALSE)
+me23.fit3 <- lmer(DiffScore ~ Condition * Experiment + (1|Subject), data = e2e3data, REML = FALSE)
+anova(me23.fit1, me23.fit2)
+anova(me23.fit1, me23.fit3)
+```
+
+```{r}
+anova(me23.fit3)
+summary(me23.fit3)
+shapiro.test(residuals(me23.fit3))
+```
+
+### Comparison between Experiments 1-3
+
+### GLMM (resubmission)
+
+```{r}
+e1e3data <- dflong %>%
+  filter(Experiment == "Experiment 1" | Experiment == "Experiment 3") %>%
+  filter(Time == "0-1 s")
+```
+
+
+```{r}
+me13.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1e3data, REML = FALSE)
+me13.fit2 <- lmer(DiffScore ~ Condition + Experiment + (1|Subject), data = e1e3data, REML = FALSE)
+me13.fit3 <- lmer(DiffScore ~ Condition * Experiment + (1|Subject), data = e1e3data, REML = FALSE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+e1e3data <- subset(dflong, (Experiment == "Experiment 1" | Experiment == "Experiment 3")) %>%
+  filter(Time == "0-1 s")
+        
+ae1e3<-aov_car((DiffScore ~ Condition*Experiment 
+                + Error(Subject/Condition) + Experiment), 
+  data = e1e3data)
+
+summary(ae1e3)
+eta_sq(ae1e3, partial = TRUE)
+```
+
+# Experiment 4 (Point + Name + Occlude)
+
+```{r }
+head(e4data)
+```
+
+### Descriptive statistics
+Compute the summary descriptive statistics.
+```{r echo=FALSE}
+e4data %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_sd")
+
+# Collapsed across time bins
+df %>%
+  filter(Experiment == "Experiment 4") %>%
+  group_by(Condition) %>%
+  get_summary_stats(dftrial,type = "mean_sd")
+```
+
+### Normality
+
+Perform the Shapiro-Wilk test of normality.
+```{r echo=FALSE}
+#Normality
+df %>%
+  filter(Experiment == "Experiment 4") %>%
+  group_by(Condition) %>%
+  shapiro_test(dftrial)
+```
+
+Draw the histograms of the data.
+```{r echo=FALSE, warning=FALSE}
+p <- gghistogram(e4data, x = "DiffScore",
+                 ggtheme = theme_pubclean(),
+                 add = "mean", rug = TRUE, bins = "8",
+                 color = "Condition", fill = "Condition", alpha = .2,
+                 palette = c("#00AFBB", "#E7B800"),
+                 xlab = "Difference Score") +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+
+p + font("x.text", size = 6.5) 
+```
+
+
+Draws the correlation between the data and the normal distribution.
+```{r echo=FALSE, warning=FALSE}
+ggqqplot(e4data, "DiffScore", ggtheme = theme_pubclean()) +
+          facet_grid(Condition ~ Time, labeller = "label_both")
+```
+
+### GLMM (resubmission)
+
+```{r}
+me4.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e4data, REML = FALSE)
+me4.fit2 <- lmer(DiffScore ~ Condition+Time + (1|Subject), data = e4data, REML = FALSE)
+me4.fit3 <- lmer(DiffScore ~ Condition*Time + (1|Subject), data = e4data, REML = FALSE)
+```
+
+```{r echo=FALSE, warning=FALSE}
+ae4 <- aov_car(DiffScore ~ Time*Condition + Error(Subject/Time*Condition), data = e4data)
+summary(ae4)
+eta_sq(ae4, partial = TRUE)
+```
+
+
+### ANOVA (submission)
+
+A repeated-measures ANOVA with:
+* $condition$ (trained v. novel word) as a within-subject factor
+* $time$ (test bin 1 v. test bin 2 v. test bin 3 v. test bin 4) as a within-subject factor
+
+```{r echo=FALSE, warning=FALSE}
+#Run the analysis
+ae4 <- aov_car(DiffScore ~ Time*Condition + Error(Subject/Time*Condition), data = e4data)
+
+#Display the results
+summary(ae4)
+eta_sq(ae4, partial = TRUE)
+```
+
+
+### Figures
+
+```{r }
+e4plot <- e4data
+
+e4plot$Time <- factor(e4plot$Time, 
+                       levels = c("0-1 s","1-2 s",
+                                  "2-3 s", "3-4 s", "4-5 s"))
+
+e4s <- e4plot %>%
+  group_by(Condition, Time) %>%
+  get_summary_stats(DiffScore,type = "mean_se")
+  
+e4s$Time <- factor(e4s$Time)
+```
+
+```{r }
+library(ggrepel)
+library(grid)
+grob <- grobTree(textGrob("Object targeted by the action", x=.6,  y=.9, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+grob2 <- grobTree(textGrob("Distractor", x=.86,  y=.1, hjust=0,
+  gp=gpar(col="gray50", fontsize=16)))
+```
+
+#### Line plots
+
+```{r echo=FALSE}
+pe4.l <- ggplot(data = e4s,aes(x=Time, y = mean, color=Condition,group=Condition)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20),
+                 plot.subtitle = element_text(size = 16, face = "italic")) +
+  geom_point(size=3) +
+  geom_line(aes(linetype=Condition),size=1) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +#,position=position_dodge(.9)) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  scale_y_continuous(name="Difference Score", limits=c(-.8, .8)) +
+  ggtitle(label = "Experiment 4", subtitle = "Pointing + Naming + Occlusion + Objects' location swap") +
+  annotation_custom(grob) +
+  annotation_custom(grob2)
+
+pe4.l
+```
+
+#### Box plots
+
+```{r}
+b4 <- ggplot(data = e4data, aes(x=Time, y=DiffScore)) +
+  theme_light() +
+          theme(strip.text = element_text(size = 14),
+                panel.grid.major.y = element_line(colour="gray75"),
+                panel.grid.major.x = element_blank(),
+                legend.position="none",
+                axis.text.y = element_text(size=16),
+                axis.text.x = element_text(size=16),
+                axis.title.y=element_text(size=16,face="bold"),
+                axis.title.x = element_blank(),
+                plot.title = element_text(size = 20)) +
+  geom_boxplot(aes(fill=Condition), position = position_dodge(.9), alpha = .05) +
+  geom_jitter(aes(color=Condition),position = position_jitterdodge(.15)) +
+  scale_y_continuous(name="Difference Score", limits=c(-1.25, 1.25)) +
+  scale_fill_manual(values = c("steelblue", "orange")) +
+  scale_color_manual(values = c("steelblue", "orange")) +
+  ggtitle("  \n ")
+
+b4
+
+```
+
+### Folluw-up tests (resubmission)
+
+#### Average over time
+
+Descriptive statistics.
+```{r echo=FALSE}
+e4datatimeave <-e4data %>%
+  group_by(Subject,Condition) %>%
+  summarize(avedf = mean(DiffScore, na.rm=T))
+
+e4datatimeave %>%
+  group_by(Condition) %>%
+  get_summary_stats(avedf, type="mean_sd")
+```
+
+```{r echo=FALSE}
+#Normality
+e4datatimeave %>%
+  group_by(Condition) %>%
+  shapiro_test(avedf)
+```
+
+#### Comparisons to chance
+
+```{r }
+#Trained condition
+t.test(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 4"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Trained" & df$Experiment == "Experiment 4"], mu = 0)
+
+#Novel condition
+t.test(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 4"], mu = 0, alternative = "two.sided")
+cohensD(df$dftrial[df$Condition == "Novel" & df$Experiment == "Experiment 4"], mu = 0)
+```
+
+
+### Follow-up tests (submission)
+
+#### Comparisons between conditions
+
+To solve the interaction between $condition x time$, we conducted separate paired samples t tests within each test bin.
+
+```{r }
+t.test(DiffScore ~ Condition, data = e4data %>% filter(Time == "0-1 s"), paired = TRUE)
+cohensD(DiffScore ~ Condition, data = e4data %>% filter(Time == "0-1 s"), method = "paired")
+```
+
+```{r }
+t.test(DiffScore ~ Condition, data = e4data %>% filter(Time == "1-2 s"), paired = TRUE)
+cohensD(DiffScore ~ Condition, data = e4data %>% filter(Time == "1-2 s"), method = "paired")
+```
+
+```{r }
+t.test(DiffScore ~ Condition, data = e4data %>% filter(Time == "2-3 s"), paired = TRUE)
+cohensD(DiffScore ~ Condition, data = e4data %>% filter(Time == "2-3 s"), method = "paired")
+```
+
+#### Comparisons to chance
+
+
+### Comparision between Experiments 1 v. 4 
+
+```{r}
+e1e4data <- dflong %>%
+  filter(Experiment == "Experiment 1" | Experiment == "Experiment 4") %>%
+  filter(Time == "0-1 s")
+```
+
+
+```{r}
+me14.fit1 <- lmer(DiffScore ~ Condition + (1|Subject), data = e1e4data, REML = FALSE)
+me14.fit2 <- lmer(DiffScore ~ Condition + Experiment + (1|Subject), data = e1e4data, REML = FALSE)
+me14.fit3 <- lmer(DiffScore ~ Condition * Experiment + (1|Subject), data = e1e4data, REML = FALSE)
+```
+
+# Manuscript figure
+
+```{r}
+e1 <- ggarrange(pe1.l, b1,
+                ncol = 2, widths = c(1.5,1),
+                common.legend = TRUE, legend = "bottom")
+
+e2 <- ggarrange(pe2.l, b2,
+                ncol = 2, widths = c(1.5,1),
+                common.legend = TRUE, legend = "bottom")
+      
+e3 <- ggarrange(pe3.l,b3,
+          ncol = 2, widths = c(1.5,1),
+          common.legend = TRUE, legend = "bottom")
+
+e4 <- ggarrange(pe4.l,b4,
+                ncol = 2, widths = c(1.5,1),
+                common.legend = TRUE, legend = "bottom")
+```
+
+```{r echo=FALSE}
+figure2 <- ggarrange(e1, e2, e3, e4,
+          ncol = 1,
+          common.legend = TRUE, legend = "bottom")
+
+figure2
+```
+
+```{r include=FALSE}
+ggsave("plots/figure2.png", plot = last_plot(), width = 35, height = 45, units = c("cm"))
+```
+
