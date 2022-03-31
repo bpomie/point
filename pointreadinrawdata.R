@@ -3,7 +3,7 @@
 # ================================================
 
 # Set the path
-setwd("~/Documents/GitHub/point/data/dataindividual/")
+setwd("~/Documents/GitHub/point/data/dataraw/")
 #Get file names of individual data files
 my_files <- list.files(pattern = "xlsx$")
 # Read each excel file into a list
