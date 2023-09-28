@@ -2,7 +2,7 @@
 
 Project repository for the study: *Nonverbal action interpretation guides novel word disambiguation in 12-month-olds*
 
-Nonverbal action interpretation guides novel word disambiguation in 12-month-olds
+[Nonverbal action interpretation guides novel word disambiguation in 12-month-olds](https://doi.org/10.1162/opmi_a_00055)
 
 ## Structure
 
