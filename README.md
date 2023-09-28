@@ -1,8 +1,8 @@
 # point
 
-Project repository for the study: *Nonverbal action interpretation guides novel word disambiguation in 12-month-olds*
+Project repository for:
 
-[Nonverbal action interpretation guides novel word disambiguation in 12-month-olds](https://doi.org/10.1162/opmi_a_00055)
+Pomiechowska, B., & Csibra, G. (2022). Nonverbal action interpretation guides novel word disambiguation in 12-month-olds. *Open Mind*, 6, 51-76. DOI: [Nonverbal action interpretation guides novel word disambiguation in 12-month-olds](https://doi.org/10.1162/opmi_a_00055)](https://doi.org/10.1162/opmi_a_00055)
 
 ## Structure
 
